@@ -1,0 +1,6 @@
+ansys-acp-core==0.4.1
+ansys-geometry-core==0.18.1
+ansys-mechanical-core==0.13.3
+ipykernel==7.4.0
+matplotlib==3.11.2
+pandas==3.0.6

@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pedal floor results</title>
+<!-- Written by pedal_floor/viewer.py; regenerate with viewer.build() rather than editing. -->
+<style>
+:root {
+  --bg: #f5f6f8; --panel: #ffffff; --text: #1c2230; --muted: #5f6878; --line: #dde1e7; --hover: #f0f3f8;
+  --accent: #2563c9; --accent-soft: #e6eefb; --ok: #17733f; --ok-soft: #e2f3e9; --bad: #b42318; --bad-soft: #fde7e4;
+  --shadow: 0 1px 2px rgba(16, 24, 40, .06);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14171c; --panel: #1c2027; --text: #e5e8ee; --muted: #9aa3b2; --line: #2f3540; --hover: #242a33;
+    --accent: #6fa2ff; --accent-soft: #1e2a40; --ok: #5ccf8c; --ok-soft: #16301f; --bad: #ff7d70; --bad-soft: #3a1d1a;
+    --shadow: none; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14171c; --panel: #1c2027; --text: #e5e8ee; --muted: #9aa3b2; --line: #2f3540; --hover: #242a33;
+  --accent: #6fa2ff; --accent-soft: #1e2a40; --ok: #5ccf8c; --ok-soft: #16301f; --bad: #ff7d70; --bad-soft: #3a1d1a;
+  --shadow: none; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+button, select, input { font: inherit; color: inherit; }
+header.top { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+  padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header.top h1 { font-size: 17px; margin: 0; }
+.muted { color: var(--muted); }
+.tabs { display: flex; gap: 4px; margin-left: auto; }
+.tabs button { border: 1px solid var(--line); background: var(--panel); padding: 5px 14px; border-radius: 6px; cursor: pointer; }
+.tabs button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.layout { display: grid; grid-template-columns: 270px minmax(0, 1fr); min-height: calc(100vh - 50px); }
+aside { border-right: 1px solid var(--line); background: var(--panel); padding: 12px 14px 40px; overflow-y: auto;
+  position: sticky; top: 50px; height: calc(100vh - 50px); }
+aside h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 4px 0 8px; }
+fieldset { border: 0; border-top: 1px solid var(--line); margin: 0; padding: 8px 0 10px; }
+fieldset legend { padding: 0; font-weight: 600; width: 100%; display: flex; justify-content: space-between; align-items: baseline; }
+fieldset legend span.links button { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0 0 0 6px; font-size: 12px; }
+label.opt { display: flex; gap: 6px; align-items: flex-start; padding: 2px 0; cursor: pointer; word-break: break-word; }
+label.opt input { margin-top: 3px; }
+label.opt .n { color: var(--muted); margin-left: auto; padding-left: 6px; white-space: nowrap; flex-shrink: 0; }
+.fixed { border-top: 1px solid var(--line); padding-top: 8px; font-size: 12.5px; }
+.fixed div { padding: 2px 0; word-break: break-word; }
+main { padding: 14px 16px 40px; min-width: 0; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: end; margin-bottom: 12px; }
+.controls label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.controls select { padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); min-width: 150px; max-width: 340px; }
+.group-title { font-size: 15px; margin: 18px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--tile, 420px), 1fr)); gap: 12px; }
+.tile { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; }
+.tile header { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+.tile header b { font-size: 14px; }
+.badge { margin-left: auto; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 10px; }
+.badge.ok { background: var(--ok-soft); color: var(--ok); }
+.badge.bad { background: var(--bad-soft); color: var(--bad); }
+.tile .img { border: 0; padding: 0; background: #fff; cursor: zoom-in; display: block; width: 100%; aspect-ratio: 16 / 9; }
+.tile img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.noimg { aspect-ratio: 16 / 9; display: grid; place-items: center; color: var(--muted); background: var(--hover); padding: 10px; text-align: center; font-size: 12.5px; }
+.tile figcaption { padding: 7px 10px 9px; font-size: 12.5px; display: grid; gap: 3px; }
+.tile .cfg { color: var(--muted); }
+.metric b { font-variant-numeric: tabular-nums; }
+.empty { padding: 40px; text-align: center; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips label { flex-direction: row; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 14px; padding: 3px 10px;
+  background: var(--panel); color: var(--text); cursor: pointer; font-size: 12.5px; }
+.chips label:has(input:checked) { background: var(--accent-soft); border-color: var(--accent); }
+.tablewrap { overflow: auto; max-height: calc(100vh - 170px); border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+table { border-collapse: separate; border-spacing: 0; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+th, td { padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; text-align: right; }
+th { position: sticky; top: 0; z-index: 2; background: var(--panel); vertical-align: bottom; cursor: pointer; font-weight: 600; text-align: center;
+  border-bottom: 2px solid var(--line); }
+th .u { display: block; font-weight: 400; color: var(--muted); font-size: 11px; }
+th.sorted { color: var(--accent); }
+td.text { text-align: left; max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+.sticky1, .sticky2 { position: sticky; z-index: 1; background: var(--panel); }
+th.sticky1, th.sticky2 { z-index: 3; }
+.sticky1 { left: 0; min-width: 52px; }
+.sticky2 { left: 52px; border-right: 1px solid var(--line); }
+tbody tr { cursor: pointer; }
+tbody tr:hover td { background: var(--hover); }
+td.ok { color: var(--ok); font-weight: 600; text-align: center; }
+td.bad { color: var(--bad); font-weight: 600; text-align: center; }
+td.neg { color: var(--bad); background: var(--bad-soft); }
+#lightbox { position: fixed; inset: 0; z-index: 20; background: rgba(10, 12, 16, .88); display: flex; flex-direction: column; color: #eef1f6; }
+#lightbox[hidden] { display: none; }
+#lightbox .bar { display: flex; gap: 12px; align-items: center; padding: 10px 16px; }
+#lightbox .bar button { background: rgba(255, 255, 255, .12); border: 0; color: #fff; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+#lightbox .stage { flex: 1; min-height: 0; display: grid; place-items: center; padding: 0 16px; }
+#lightbox .stage img { max-width: 100%; max-height: 100%; background: #fff; border-radius: 4px; }
+#lightbox .info { padding: 10px 16px 16px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 18px; }
+#lightbox .info span b { color: #fff; }
+.menu-toggle { display: none; }
+@media (max-width: 760px) {
+  .layout { grid-template-columns: 1fr; }
+  aside { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); display: none; }
+  aside.open { display: block; }
+  .menu-toggle { display: inline-block; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 5px 10px; }
+  .grid { grid-template-columns: 1fr; }
+  .tablewrap { max-height: none; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <button class="menu-toggle" id="menu">Filters</button>
+  <h1>Pedal floor results</h1>
+  <span class="muted" id="count"></span>
+  <div class="tabs" role="tablist">
+    <button role="tab" data-tab="plots">Plots</button>
+    <button role="tab" data-tab="table">Table</button>
+  </div>
+</header>
+<div class="layout">
+  <aside id="filters"></aside>
+  <main>
+    <section id="plots">
+      <div class="controls">
+        <label>Result<select id="result"></select></label>
+        <label>Group by<select id="groupby"></select></label>
+        <label>Value under each plot<select id="caption"></select></label>
+        <label>Order<select id="sort">
+          <option value="case">Case, then pedal position</option>
+          <option value="asc">Value under plot, low to high</option>
+          <option value="desc">Value under plot, high to low</option>
+        </select></label>
+        <label>Plot size<input type="range" id="tile" min="260" max="1000" step="20"></label>
+      </div>
+      <div id="grid"></div>
+    </section>
+    <section id="table" hidden>
+      <div class="controls"><div class="chips" id="colgroups"></div></div>
+      <div class="tablewrap"><table id="tbl"></table></div>
+      <p class="muted">Click a column header to sort, and a row to see its plot of the selected result.</p>
+    </section>
+  </main>
+</div>
+<div id="lightbox" hidden>
+  <div class="bar">
+    <strong id="lb-title"></strong>
+    <span class="muted" id="lb-pos"></span>
+    <span style="margin-left:auto"></span>
+    <button id="lb-prev" title="Previous (←)">←</button>
+    <button id="lb-next" title="Next (→)">→</button>
+    <button id="lb-close" title="Close (Esc)">Close</button>
+  </div>
+  <div class="stage" id="lb-stage"></div>
+  <div class="info" id="lb-info"></div>
+</div>
+<script id="data" type="application/json">__DATA__</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById("data").textContent);
+const ROWS = DATA.rows;
+const COLS = DATA.columns;
+const INPUTS = DATA.inputs;
+const STORE = "pedal-floor-viewer";
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"})[c]);
+
+// ---- column names and values -------------------------------------------------
+const UNITS = {in: "in", lbf: "lbf", psi: "psi", lb: "lb", lbft2: "lb/ft²", mm: "mm", N: "N", MPa: "MPa", kg: "kg", kgm2: "kg/m²", s: "s"};
+function splitName(col) {  // -> [name, unit]
+  const m = col.match(/^(.*) \[(.+)\]$/);
+  if (m) return [m[1].replace(/_/g, " "), m[2]];
+  const i = col.lastIndexOf("_");
+  if (i > 0 && UNITS[col.slice(i + 1)]) return [col.slice(0, i).replace(/_/g, " "), UNITS[col.slice(i + 1)]];
+  return [col.replace(/_/g, " "), ""];
+}
+const isBoolCol = col => /(^|_)ok$|passes$/.test(col);
+const asBool = v => v === true || v === "True" ? true : v === false || v === "False" ? false : null;
+const key = v => v === null || v === undefined || v === "" ? "(blank)" : String(v);
+const shortLayup = s => String(s).replace(/\bU(?: U)+\b/g, m => "U×" + m.split(" ").length);
+function showInput(col, v) {
+  if (v === null || v === undefined || v === "") return "—";
+  return col === "layup" ? shortLayup(v) : String(v);
+}
+function fmt(v) {
+  if (v === null || v === undefined || v === "") return "—";
+  if (typeof v === "boolean") return v ? "✓" : "✗";
+  if (typeof v !== "number") return String(v);
+  const a = Math.abs(v);
+  if (a === 0) return "0";
+  if (a >= 1000) return v.toFixed(0);
+  if (a >= 100) return v.toFixed(1);
+  if (a >= 1) return v.toFixed(3);
+  return v.toPrecision(3);
+}
+function sortValues(values) {
+  return values.sort((a, b) => {
+    const x = Number(a), y = Number(b);
+    if (!isNaN(x) && !isNaN(y) && a !== "(blank)" && b !== "(blank)") return x - y;
+    return a.localeCompare(b, undefined, {numeric: true});
+  });
+}
+
+// ---- filters ----------------------------------------------------------------
+const FILTER_COLS = [...INPUTS, "status", "passes", "case_passes"].filter((c, i, a) => COLS.includes(c) && a.indexOf(c) === i);
+const DISTINCT = {};
+for (const c of FILTER_COLS) {
+  const counts = {};
+  for (const r of ROWS) counts[key(r[c])] = (counts[key(r[c])] || 0) + 1;
+  DISTINCT[c] = {values: sortValues(Object.keys(counts)), counts};
+}
+// Case id last: it is a long list, for picking out particular cases.
+const VARYING = [...FILTER_COLS.filter(c => c !== "case_id"), "case_id"].filter(c => DISTINCT[c] && DISTINCT[c].values.length > 1);
+const DESCRIBE = INPUTS.filter(c => c !== "case_id" && c !== "pedal_offset_in" && DISTINCT[c].values.length > 1);
+
+// ---- state ------------------------------------------------------------------
+const state = {off: {}, tab: "plots", result: DATA.results[0] || "", groupby: "", caption: "", sort: "case", tile: 420,
+               groups: null, tsort: null};
+try { Object.assign(state, JSON.parse(localStorage.getItem(STORE) || "{}")); } catch (e) { /* no storage */ }
+function save() { try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) { /* no storage */ } }
+const offSet = c => new Set(state.off[c] || []);
+function visibleRows() {
+  return ROWS.filter(r => VARYING.every(c => !(state.off[c] || []).includes(key(r[c]))));
+}
+
+function renderFilters() {
+  const el = $("filters");
+  let html = "<h2>Filters</h2>";
+  if (!VARYING.length) html += '<p class="muted">Every run has the same inputs.</p>';
+  for (const c of VARYING) {
+    const [name, unit] = splitName(c);
+    const off = offSet(c);
+    html += `<fieldset><legend><span>${esc(name)}${unit ? ` <span class="muted">[${esc(unit)}]</span>` : ""}</span>` +
+            `<span class="links"><button data-all="${esc(c)}">all</button><button data-none="${esc(c)}">none</button></span></legend>`;
+    for (const v of DISTINCT[c].values) {
+      html += `<label class="opt"><input type="checkbox" data-col="${esc(c)}" value="${esc(v)}"${off.has(v) ? "" : " checked"}>` +
+              `<span>${esc(c === "layup" ? shortLayup(v) : v)}</span><span class="n">${DISTINCT[c].counts[v]}</span></label>`;
+    }
+    html += "</fieldset>";
+  }
+  const fixed = INPUTS.filter(c => c !== "case_id" && DISTINCT[c] && DISTINCT[c].values.length === 1);
+  if (fixed.length) {
+    html += '<div class="fixed"><h2>Same in every run</h2>' +
+            fixed.map(c => { const [n, u] = splitName(c); return `<div><b>${esc(n)}</b>: ${esc(showInput(c, ROWS[0][c]))}${u ? " " + esc(u) : ""}</div>`; }).join("") +
+            "</div>";
+  }
+  html += `<p class="muted" style="font-size:12px">Built ${esc(DATA.generated)} from outputs/results.csv.</p>`;
+  el.innerHTML = html;
+}
+$("filters").addEventListener("change", e => {
+  const box = e.target;
+  if (!box.dataset.col) return;
+  const off = offSet(box.dataset.col);
+  box.checked ? off.delete(box.value) : off.add(box.value);
+  state.off[box.dataset.col] = [...off];
+  update();
+});
+$("filters").addEventListener("click", e => {
+  const c = e.target.dataset.all || e.target.dataset.none;
+  if (!c) return;
+  state.off[c] = e.target.dataset.all ? [] : [...DISTINCT[c].values];
+  renderFilters();
+  update();
+});
+$("menu").addEventListener("click", () => $("filters").classList.toggle("open"));
+
+// ---- plots ------------------------------------------------------------------
+const NUMERIC = COLS.filter(c => !INPUTS.includes(c) && ROWS.some(r => typeof r[c] === "number"));
+function fillSelect(id, options, value) {
+  $(id).innerHTML = options.map(([v, label]) => `<option value="${esc(v)}">${esc(label)}</option>`).join("");
+  $(id).value = options.some(([v]) => v === value) ? value : options[0][0];
+  return $(id).value;
+}
+function setupControls() {
+  state.result = fillSelect("result", DATA.results.length ? DATA.results.map(r => [r, r]) : [["", "(no images found)"]], state.result);
+  state.groupby = fillSelect("groupby", [["", "Nothing"], ...VARYING.filter(c => INPUTS.includes(c)).map(c => [c, splitName(c)[0]])], state.groupby);
+  const preferred = state.caption || (NUMERIC.includes("max_total_def_in") ? "max_total_def_in" : NUMERIC.includes("max_total_def_mm") ? "max_total_def_mm" : "");
+  state.caption = fillSelect("caption", [["", "Nothing"], ...NUMERIC.map(c => { const [n, u] = splitName(c); return [c, u ? `${n} [${u}]` : n]; })], preferred);
+  $("sort").value = state.sort;
+  $("tile").value = state.tile;
+  document.documentElement.style.setProperty("--tile", state.tile + "px");
+}
+for (const id of ["result", "groupby", "caption", "sort"]) {
+  $(id).addEventListener("change", e => { state[id] = e.target.value; update(); });
+}
+$("tile").addEventListener("input", e => {
+  state.tile = Number(e.target.value);
+  document.documentElement.style.setProperty("--tile", state.tile + "px");
+  save();
+});
+
+function runTitle(r) { return `Case ${r.case_id} · pedal at ${Number(r.pedal_offset_in).toFixed(2)} in`; }
+function describe(r, skip) {
+  return DESCRIBE.filter(c => c !== skip).map(c => {
+    const [n, u] = splitName(c);
+    return `${n} ${showInput(c, r[c])}${u ? " " + u : ""}`;
+  }).join(" · ");
+}
+function badge(r) {
+  if (r.status && r.status !== "ok") return '<span class="badge bad">failed</span>';
+  const p = asBool(r.passes);
+  return p === null ? "" : `<span class="badge ${p ? "ok" : "bad"}">${p ? "passes" : "fails"}</span>`;
+}
+function plotRange(img) {
+  if (!img || img.max === undefined || img.max === null) return "";
+  const u = img.unit ? " " + img.unit : "";
+  return `Plot: ${fmt(img.min)} to ${fmt(img.max)}${u}${img.capped ? " (legend capped)" : ""}`;
+}
+function captionText(r) {
+  if (!state.caption) return "";
+  const [n, u] = splitName(state.caption);
+  return `${esc(n)}: <b>${esc(fmt(r[state.caption]))}</b>${u ? " " + esc(u) : ""}`;
+}
+let ORDER = [];  // rows in display order, for the lightbox
+function ordered(rows) {
+  const out = [...rows];
+  const byCase = (a, b) => a.case_id - b.case_id || a.pedal_offset_in - b.pedal_offset_in;
+  if (state.sort === "case" || !state.caption) return out.sort(byCase);
+  const sign = state.sort === "asc" ? 1 : -1;
+  return out.sort((a, b) => {
+    const x = a[state.caption], y = b[state.caption];
+    if (typeof x !== "number") return 1;
+    if (typeof y !== "number") return -1;
+    return sign * (x - y) || byCase(a, b);
+  });
+}
+function tile(r) {
+  const img = r._images[state.result];
+  const body = img
+    ? `<button class="img" data-run="${esc(r._run)}"><img loading="lazy" src="${esc(img.src)}" alt="${esc(state.result)}, ${esc(runTitle(r))}"></button>`
+    : `<div class="noimg">${r.status && r.status !== "ok" ? esc(r.status + (r.error ? ": " + r.error : "")) : "No image of this result (run viewer.export_images())"}</div>`;
+  return `<figure class="tile"><header><b>${esc(runTitle(r))}</b>${badge(r)}</header>${body}` +
+         `<figcaption><span class="cfg">${esc(describe(r, state.groupby))}</span>` +
+         `<span class="metric">${captionText(r)}</span><span class="muted">${esc(plotRange(img))}</span></figcaption></figure>`;
+}
+function renderPlots(rows) {
+  const el = $("grid");
+  if (!rows.length) { el.innerHTML = '<div class="empty">No runs match the filters.</div>'; ORDER = []; return; }
+  let groups = [["", rows]];
+  if (state.groupby) {
+    const map = new Map();
+    for (const v of DISTINCT[state.groupby].values) map.set(v, []);
+    for (const r of rows) map.get(key(r[state.groupby])).push(r);
+    groups = [...map].filter(([, g]) => g.length);
+  }
+  ORDER = [];
+  el.innerHTML = groups.map(([v, g]) => {
+    const sorted = ordered(g);
+    ORDER.push(...sorted);
+    let title = "";
+    if (state.groupby) {
+      const [n, u] = splitName(state.groupby);
+      title = `<h3 class="group-title">${esc(n)}: ${esc(state.groupby === "layup" ? shortLayup(v) : v)}${u ? " " + esc(u) : ""} ` +
+              `<span class="muted">(${g.length} run${g.length === 1 ? "" : "s"})</span></h3>`;
+    }
+    return title + `<div class="grid">${sorted.map(tile).join("")}</div>`;
+  }).join("");
+}
+$("grid").addEventListener("click", e => {
+  const b = e.target.closest("button.img");
+  if (b) openLightbox(ORDER.findIndex(r => r._run === b.dataset.run));
+});
+
+// ---- table ------------------------------------------------------------------
+const GROUPS = [
+  ["Inputs", c => INPUTS.includes(c)],
+  ["Pass / fail", c => isBoolCol(c)],
+  ["Margins (MS)", c => /_MS$/.test(c)],
+  ["Stresses & allowables", c => /_(psi|MPa)$|interaction_index$/.test(c) && !/contact_pressure/.test(c)],
+  ["Deformation", c => /_def_|_uz_/.test(c)],
+  ["Contact pressure", c => /contact_pressure/.test(c)],
+  ["Bolt forces", c => /^bolt\d/.test(c)],
+  ["Joint forces", c => /^joint\d|^outside_joints|^Fz_balance/.test(c)],
+  ["Thickness & weights", c => /mass|areal|thickness_(in|mm)$/.test(c) && !INPUTS.includes(c)],
+  ["Run info", () => true],
+];
+const GROUP_OF = {};
+for (const c of COLS) GROUP_OF[c] = GROUPS.find(([, test]) => test(c))[0];
+const DEFAULT_GROUPS = ["Inputs", "Pass / fail", "Margins (MS)", "Deformation", "Joint forces"];
+if (!Array.isArray(state.groups)) state.groups = DEFAULT_GROUPS;
+function renderChips() {
+  $("colgroups").innerHTML = GROUPS.filter(([g]) => COLS.some(c => GROUP_OF[c] === g)).map(([g]) =>
+    `<label><input type="checkbox" value="${esc(g)}"${state.groups.includes(g) ? " checked" : ""}>${esc(g)}</label>`).join("");
+}
+$("colgroups").addEventListener("change", e => {
+  state.groups = [...$("colgroups").querySelectorAll("input:checked")].map(i => i.value);
+  update();
+});
+function cell(c, v, extra) {
+  const td = (cls, text, title) => `<td class="${[extra, cls].filter(Boolean).join(" ")}"${title ? ` title="${esc(title)}"` : ""}>${esc(text)}</td>`;
+  if (isBoolCol(c)) {
+    const b = asBool(v);
+    return b === null ? td("", "—") : td(b ? "ok" : "bad", b ? "✓" : "✗");
+  }
+  if (c === "pedal_offset_in" && typeof v === "number") return td("", v.toFixed(2));
+  if (typeof v === "number") return td(/_MS$/.test(c) && v < 0 ? "neg" : "", INPUTS.includes(c) ? String(v) : fmt(v));
+  return td("text", INPUTS.includes(c) ? showInput(c, v) : fmt(v), v === null || v === undefined ? "" : String(v));
+}
+function renderTable(rows) {
+  const first = ["case_id", "pedal_offset_in"].filter(c => COLS.includes(c));
+  // Inputs that are the same in every run are listed under the filters instead.
+  const same = c => INPUTS.includes(c) && DISTINCT[c] && DISTINCT[c].values.length === 1;
+  const cols = [...first, ...GROUPS.flatMap(([g]) => state.groups.includes(g)
+    ? COLS.filter(c => GROUP_OF[c] === g && !first.includes(c) && !same(c)) : [])];
+  let sorted = [...rows].sort((a, b) => a.case_id - b.case_id || a.pedal_offset_in - b.pedal_offset_in);
+  if (state.tsort && cols.includes(state.tsort.col)) {
+    const {col, dir} = state.tsort;
+    sorted.sort((a, b) => {
+      const x = a[col], y = b[col];
+      if (x === null || x === undefined) return 1;
+      if (y === null || y === undefined) return -1;
+      return dir * (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), undefined, {numeric: true}));
+    });
+  }
+  const head = cols.map((c, i) => {
+    const [n, u] = splitName(c);
+    const cls = [i === 0 ? "sticky1" : i === 1 ? "sticky2" : "", state.tsort && state.tsort.col === c ? "sorted" : ""].join(" ").trim();
+    const arrow = state.tsort && state.tsort.col === c ? (state.tsort.dir > 0 ? " ▲" : " ▼") : "";
+    return `<th data-col="${esc(c)}" class="${cls}" title="${esc(c)}">${esc(n)}${arrow}<span class="u">${esc(u || " ")}</span></th>`;
+  }).join("");
+  const body = sorted.map(r => `<tr data-run="${esc(r._run)}">` +
+    cols.map((c, i) => cell(c, r[c], i === 0 ? "sticky1" : i === 1 ? "sticky2" : "")).join("") + "</tr>").join("");
+  $("tbl").innerHTML = `<thead><tr>${head}</tr></thead><tbody>${body}</tbody>`;
+  $("tbl").dataset.order = JSON.stringify(sorted.map(r => r._run));
+}
+$("tbl").addEventListener("click", e => {
+  const th = e.target.closest("th");
+  if (th) {
+    const col = th.dataset.col;
+    state.tsort = state.tsort && state.tsort.col === col ? (state.tsort.dir > 0 ? {col, dir: -1} : null) : {col, dir: 1};
+    update();
+    return;
+  }
+  const tr = e.target.closest("tr[data-run]");
+  if (tr) {
+    const runs = JSON.parse($("tbl").dataset.order);
+    ORDER = runs.map(run => ROWS.find(r => r._run === run));
+    openLightbox(runs.indexOf(tr.dataset.run));
+  }
+});
+
+// ---- lightbox ---------------------------------------------------------------
+let LB = -1;
+function openLightbox(i) {
+  if (i < 0 || i >= ORDER.length) return;
+  LB = i;
+  const r = ORDER[i];
+  const img = r._images[state.result];
+  $("lb-title").textContent = `${state.result} — ${runTitle(r)}`;
+  $("lb-pos").textContent = `${i + 1} of ${ORDER.length}`;
+  $("lb-stage").innerHTML = img ? `<img src="${esc(img.src)}" alt="">` : `<div>No image of this result for this run.</div>`;
+  const facts = DESCRIBE.map(c => { const [n, u] = splitName(c); return [n, showInput(c, r[c]) + (u ? " " + u : "")]; });
+  for (const c of ["passes", "core_ok", "hardpoint_ok"]) if (c in r) facts.push([c.replace(/_/g, " "), fmt(asBool(r[c]))]);
+  if (state.caption) { const [n, u] = splitName(state.caption); facts.push([n, fmt(r[state.caption]) + (u ? " " + u : "")]); }
+  if (plotRange(img)) facts.push(["plot range", plotRange(img).replace("Plot: ", "")]);
+  $("lb-info").innerHTML = facts.map(([n, v]) => `<span>${esc(n)}: <b>${esc(v)}</b></span>`).join("");
+  $("lightbox").hidden = false;
+}
+function closeLightbox() { $("lightbox").hidden = true; LB = -1; }
+$("lb-close").addEventListener("click", closeLightbox);
+$("lb-prev").addEventListener("click", () => openLightbox((LB - 1 + ORDER.length) % ORDER.length));
+$("lb-next").addEventListener("click", () => openLightbox((LB + 1) % ORDER.length));
+$("lightbox").addEventListener("click", e => { if (e.target.id === "lb-stage" || e.target.id === "lightbox") closeLightbox(); });
+document.addEventListener("keydown", e => {
+  if (LB < 0) return;
+  if (e.key === "Escape") closeLightbox();
+  if (e.key === "ArrowLeft") $("lb-prev").click();
+  if (e.key === "ArrowRight") $("lb-next").click();
+});
+
+// ---- tabs and refresh -------------------------------------------------------
+function showTab(tab) {
+  state.tab = tab;
+  for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
+  $("plots").hidden = tab !== "plots";
+  $("table").hidden = tab !== "table";
+}
+for (const b of document.querySelectorAll(".tabs button")) b.addEventListener("click", () => { showTab(b.dataset.tab); update(); });
+
+function update() {
+  const rows = visibleRows();
+  $("count").textContent = `${rows.length} of ${ROWS.length} runs`;
+  if (state.tab === "plots") renderPlots(rows); else renderTable(rows);
+  renderChips();
+  save();
+}
+renderFilters();
+setupControls();
+showTab(state.tab === "table" ? "table" : "plots");
+update();
+</script>
+</body>
+</html>

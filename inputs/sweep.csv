@@ -1,0 +1,2 @@
+case_id,hardpoint_rad [in],hardpoint_material,washer_diameter_bottom [in],core_material,core_thickness [in],layup,edge_bc
+106,3,Balsa_150,1.25,Honeycomb_3.1pcf,0.5,(0 U U U U U U 45) Core (45 U U U U U U 0),simply_supported

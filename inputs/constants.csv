@@ -1,0 +1,39 @@
+parameter,value,unit,description
+panel_length,18.1,in,Front-to-rear distance of the trapezoid along X (rear edge at x=0)
+rear_width,16.7,in,Trapezoid width along Y at the rear edge
+front_width,14.1,in,Trapezoid width along Y at the front edge
+hole_rad,0.125,in,Slot hole radius (half the slot width)
+slot_length,10.4,in,Slot length along X between the centres of its two end arcs
+hole_rear_x,1.3,in,X of the rear end-arc centre of the slots
+hole_rear_y,-3,in,Y of the left slot centreline (the pedal box slot); the right slot mirrors it with no hardpoint
+core_angle,0,deg,Core material 1-direction (honeycomb ribbon / L) measured from global X
+woven_material,WOVEN,-,Material for numeric layup tokens (woven ply at that angle)
+uni_material,UNI,-,Material for U layup tokens (UD ply at 0 deg)
+pedalbox_cad,ch_27_pedal_floor_sim.stp,-,Pedal box surface in inputs/ (rear hole at its origin; front hole forward along +X)
+pedalbox_thickness,0.25,in,PLACEHOLDER thickness given to the pedal box surface
+pedalbox_material,Al7075_T6,-,PLACEHOLDER material of the pedal box surface
+pedalbox_offset_step,8,in,Forward step for the pedal box positions along the slot (0 = rearmost position only)
+bolt_diameter,0.25,in,Fastener diameter (beam connection)
+washer_diameter_top,0.5,in,Diameter of the bolt-head contact patch on the pedal box (top)
+washer_thickness,0.25,in,Thickness of the nut-side washer body against the panel
+washer_material,Al7075_T6,-,Material of the nut-side washer body
+nut_bearing_diameter,0.4375,in,Diameter of the nut's bearing face on the washer (the beam's rigid spider); 7/16 in for a 1/4 in nut
+bolt_material,Grade8_steel,-,Fastener material
+bolt_preload,1500,lbf,Bolt pretension per fastener (load step 1)
+load_fx,450,lbf,Pedal load X component (load step 2)
+load_fy,0,lbf,Pedal load Y component (load step 2)
+load_fz,0,lbf,Pedal load Z component (load step 2)
+load_height,7.5,in,"Height of the load point above the rear pedal box hole, measured toward -Z from the pedal box mounting face"
+load_behavior,deformable,-,Remote force behaviour on the pedal box surface (deformable or rigid)
+mesh_quality,fine,-,coarse for test runs or fine for final runs (can also be a sweep column)
+mesh_global_coarse,0.25,in,Global element size (coarse)
+mesh_local_coarse,0.08,in,Element size on the hardpoint; washers and slot edges (coarse)
+mesh_pedalbox_coarse,0.125,in,Element size on the pedal box surface (coarse)
+mesh_global_fine,0.125,in,Global element size (fine)
+mesh_local_fine,0.03,in,Element size on the hardpoint; washers and slot edges (fine)
+mesh_pedalbox_fine,0.06,in,Element size on the pedal box surface (fine)
+joint_zone_radius,1,in,Radius around each bolt whose contact force counts toward that joint's net force on the panel
+contact_plot_max,3000,psi,Top of the colour scale in contact_pressure.png (higher values show as the top colour; 0 = automatic)
+result_units,imperial,-,Units of results.csv: imperial (lbf; in; psi; lb) or metric (N; mm; MPa; kg)
+allowable_basis,min,-,Datasheet strength used for the checks: min or typ (falls back to the other if missing)
+safety_factor,1,-,Required factor of safety; MS = allowable / (safety_factor x stress) - 1 and a check passes at MS >= 0
