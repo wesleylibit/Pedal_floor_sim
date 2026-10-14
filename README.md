@@ -6,12 +6,12 @@ Parametric stiffness / load-derivation model of the FSAE pedal floor sandwich pa
 
 - Windows.
 - Ansys **2026 R1** or **2025 R2** with Mechanical, ACP and SpaceClaim (or Discovery), and licences for them.
-- Python **3.11–3.13** ([python.org](https://www.python.org/downloads/)).
+- Python **3.11–3.14** ([python.org](https://www.python.org/downloads/)); used on 3.13 and 3.14.
 
 ## Setup (once)
 
-1. Unzip anywhere.
-2. Double-click `setup.bat`, which creates `.venv` and installs the packages in `requirements.txt`.
+1. Get the code from GitHub: clone the repository, or use **Code → Download ZIP** and unzip it anywhere.
+2. Double-click `setup.bat`, which creates `.venv` and installs the packages in `requirements.txt`. Each PC needs its own `.venv`; don't copy one from another PC (it points to that PC's Python).
 3. Open the folder in VS Code and select the **.venv** Python kernel for the notebooks.
 
 The newest supported Ansys version installed is used (2026 R1 before 2025 R2). To pick one, set the environment variable `PEDAL_FLOOR_ANSYS_VERSION` to `261` or `252` before starting VS Code.
@@ -20,8 +20,6 @@ The newest supported Ansys version installed is used (2026 R1 before 2025 R2). T
 
 - `Pedal_floor_FEA_script.ipynb`: validate the inputs, run one case, then the whole sweep. Its first cell explains the inputs in detail.
 - `results_viewer.ipynb`: builds `outputs/results_viewer.html` and opens it in your browser. The page shows any result plot for every run, plus a table of `results.csv`, with filters on the inputs. It can also export plots for runs solved before plots were exported automatically.
-- `deformation_summary.ipynb`: after a sweep, merges each case's deformation plots (all pedal positions) into one labelled image in `deformation summary/`.
-
 Rough runtimes: about 80 s per run on the coarse mesh, 170 s on the fine mesh (`mesh_quality` in `inputs/constants.csv`). Each sweep row runs at every pedal box position (9 with the default 1 in step).
 
 ## Inputs (`inputs/`)
@@ -67,4 +65,6 @@ Details:
 - A hardpoint that reaches past a panel edge is trimmed at that edge, so its area and mass are only what lies on the panel. It may not reach the right slot. The slots and the nut-side washers must still fit inside the panel.
 - Contacts act between shell reference surfaces with Adjust to Touch. Mechanical only allows shell-thickness contact for mid-plane sections, and the ACP layup is offset. The washer reference surface sits 1/16 in from the panel's, so its shear acts close to the real interface.
 - The peak contact pressure at the washer edges depends on the mesh. Read the pressure distribution, not that peak.
-- Developed and tested on Ansys 2025 R2. On 2026 R1, Mechanical and ACP connect over their default secure local channel. On 2025 R2 without the gRPC service pack they fall back to an insecure channel that only listens on localhost.
+- Developed on Ansys 2025 R2. An earlier version (before the washer bodies, strength checks and results viewer) ran a full sweep on 2026 R1. The parts added since then have only been run on 2025 R2, so run one case first on a 2026 R1 PC.
+- On 2026 R1, Mechanical and ACP connect over their default secure local channel. On 2025 R2 without the gRPC service pack they fall back to an insecure channel that only listens on localhost.
+- 2026 R1 returns a sketched surface with holes as separate faces, and rebuilding it from its edges hits a curve-scale bug in ansys-geometry-core 0.18. `geometry.py` repairs the curves for that case (`_surface_with_holes`); 2025 R2 does not need it.

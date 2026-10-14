@@ -22,10 +22,11 @@ import collections
 import math
 import pathlib
 
+import numpy as np
 from ansys.geometry.core import launch_modeler
 from ansys.geometry.core.math import Plane, Point2D, Point3D, UNITVECTOR3D_X, UNITVECTOR3D_Y, UNITVECTOR3D_Z
 from ansys.geometry.core.misc import DEFAULT_UNITS, UNITS
-from ansys.geometry.core.shapes.curves import Circle
+from ansys.geometry.core.shapes.curves import Circle, Line
 from ansys.geometry.core.sketch import Sketch
 
 from .config import ANSYS_VERSION, INPUTS, half_width, require_ansys, slot_centre_x
@@ -115,6 +116,42 @@ def _stadium(sketch: Sketch, p: dict, y: float, radius: float) -> None:
     sketch.slot(Point2D([slot_centre_x(p), y]), p["slot_length"] + 2 * radius, 2 * radius)
 
 
+def _repaired(curve):
+    """Copy of a body edge's trimmed curve with a usable underlying geometry.
+
+    The origin and radius of curves read back from a body come back 1000 times too small
+    (seen on 25R2 and 26R1 with ansys-geometry-core 0.18), and 26R1 rejects them as an
+    "Invalid profile" when they are sent back. The endpoints are correct, so lines are
+    rebuilt from the start point and circles are rescaled when they do not fit.
+    """
+    geometry, start = curve.geometry, np.asarray(curve.start, dtype=float)
+    if isinstance(geometry, Line):
+        return type(curve)(Line(Point3D(start, UNITS.m), geometry.direction), curve.start, curve.end,
+                           type(curve.interval)(0, curve.length.m_as(UNITS.m)), curve.length)
+    origin, radius = np.asarray(geometry.origin, dtype=float), geometry.radius.m_as(UNITS.m)
+    if abs(np.linalg.norm(start - origin) - radius) > 1e-6:
+        origin, radius = origin * 1000, radius * 1000
+    circle = Circle(Point3D(origin, UNITS.m), radius * UNITS.m, geometry.dir_x, geometry.dir_z)
+    return type(curve)(circle, curve.start, curve.end, curve.interval, curve.length)
+
+
+def _surface_with_holes(design, name: str, sketch: Sketch):
+    """Planar surface body from a sketch whose inner loops are holes.
+
+    Replaces ``create_surface(..., merge_inner_loops=True)``. 25R2 already returns one
+    face with holes. 26R1 returns each inner loop as a face of its own, and the library
+    then rebuilds the body from its edge curves, which 26R1 rejects (see ``_repaired``);
+    here they are repaired first.
+    """
+    raw = design.create_surface(name + "_raw", sketch)
+    if len(raw.faces) == 1:
+        raw.set_name(name)
+        return raw
+    body = design.create_surface_from_trimmed_curves(name, [_repaired(e.shape) for e in raw.edges])
+    design.delete_body(raw)
+    return body
+
+
 def _hardpoint_outline(p: dict, y: float, r: float) -> Sketch:
     """The hardpoint stadium as its four curves, for imprinting on the panel.
 
@@ -187,7 +224,7 @@ def build_model(modeler, p: dict, offset: float, holes: list[tuple[float, float]
     outline.segment(Point2D(corners[0]), Point2D(corners[1]))
     for corner in corners[2:] + corners[:1]:
         outline.segment_to_point(Point2D(corner))
-    panel = design.create_surface(PANEL_BODY, outline, merge_inner_loops=True)
+    panel = _surface_with_holes(design, PANEL_BODY, outline)
     # Trimmed at the panel edges where it reaches past them.
     panel.imprint_curves(faces=panel.faces, sketch=_hardpoint_outline(p, y_left, r_hp))
 
@@ -231,7 +268,7 @@ def build_model(modeler, p: dict, offset: float, holes: list[tuple[float, float]
         ring = Sketch(washer_plane)
         ring.circle(Point2D([x, y]), r_bottom)
         ring.circle(Point2D([x, y]), r_bolt)
-        washer = design.create_surface(washer_body(i), ring, merge_inner_loops=True)
+        washer = _surface_with_holes(design, washer_body(i), ring)
         if r_nut < r_bottom - TOL:
             nut = Sketch(washer_plane)
             nut.circle(Point2D([x, y]), r_nut)
