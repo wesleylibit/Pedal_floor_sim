@@ -6,12 +6,15 @@ Parametric stiffness / load-derivation model of the FSAE pedal floor sandwich pa
 
 - Windows.
 - Ansys **2026 R1** or **2025 R2** with Mechanical, ACP and SpaceClaim (or Discovery), and licences for them.
-- Python **3.11–3.14** ([python.org](https://www.python.org/downloads/)); used on 3.13 and 3.14.
+- Python **3.11–3.14** ([python.org](https://www.python.org/downloads/)); used on 3.13 and 3.14. If none is installed, `setup.bat` offers to install Python 3.13.
 
 ## Setup (once)
 
 1. Get the code from GitHub: clone the repository, or use **Code → Download ZIP** and unzip it anywhere.
-2. Double-click `setup.bat`, which creates `.venv` and installs the packages in `requirements.txt`. Each PC needs its own `.venv`; don't copy one from another PC (it points to that PC's Python).
+2. Double-click `setup.bat`. It creates `.venv` and installs the packages in `requirements.txt`.
+   - **Python:** it uses an installed Python 3.11–3.14. If there is none, it offers to install Python 3.13 for your Windows user with winget (no admin rights needed). Without winget, it points you to python.org.
+   - **`.venv`:** each PC needs its own. A `.venv` copied from another PC points to that PC's Python, so `setup.bat` rebuilds it.
+   - **Errors:** if anything fails, the window stays open with the reason. Fix it and run `setup.bat` again.
 3. Open the folder in VS Code and select the **.venv** Python kernel for the notebooks.
 
 The newest supported Ansys version installed is used (2026 R1 before 2025 R2). To pick one, set the environment variable `PEDAL_FLOOR_ANSYS_VERSION` to `261` or `252` before starting VS Code.

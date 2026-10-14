@@ -1,0 +1,2 @@
+# cmd.exe needs Windows (CRLF) line endings in batch files; with LF its labels can fail.
+*.bat text eol=crlf
