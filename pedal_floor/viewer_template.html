@@ -63,6 +63,7 @@ main { padding: 14px 16px 40px; min-width: 0; }
 .tile .img { border: 0; padding: 0; background: #fff; cursor: zoom-in; display: block; width: 100%; aspect-ratio: 16 / 9; }
 .tile img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .noimg { aspect-ratio: 16 / 9; display: grid; place-items: center; color: var(--muted); background: var(--hover); padding: 10px; text-align: center; font-size: 12.5px; }
+button.link { border: 0; background: none; padding: 0; color: var(--accent); text-decoration: underline; cursor: pointer; font-size: inherit; }
 .tile figcaption { padding: 7px 10px 9px; font-size: 12.5px; display: grid; gap: 3px; }
 .tile .cfg { color: var(--muted); }
 .metric b { font-variant-numeric: tabular-nums; }
@@ -243,7 +244,7 @@ function renderFilters() {
             fixed.map(c => { const [n, u] = splitName(c); return `<div><b>${esc(n)}</b>: ${esc(showInput(c, ROWS[0][c]))}${u ? " " + esc(u) : ""}</div>`; }).join("") +
             "</div>";
   }
-  html += `<p class="muted" style="font-size:12px">Built ${esc(DATA.generated)} from outputs/results.csv.</p>`;
+  html += `<p class="muted" style="font-size:12px">Built ${esc(DATA.generated)}. Runs stay here after their folders are deleted from outputs/.</p>`;
   el.innerHTML = html;
 }
 $("filters").addEventListener("change", e => {
@@ -271,7 +272,10 @@ function fillSelect(id, options, value) {
   return $(id).value;
 }
 function setupControls() {
-  state.result = fillSelect("result", DATA.results.length ? DATA.results.map(r => [r, r]) : [["", "(no images found)"]], state.result);
+  const runs = {};  // how many runs have each plot
+  for (const r of ROWS) for (const name of Object.keys(r._images)) runs[name] = (runs[name] || 0) + 1;
+  const label = name => runs[name] < ROWS.length ? `${name} (${runs[name]} of ${ROWS.length} runs)` : name;
+  state.result = fillSelect("result", DATA.results.length ? DATA.results.map(r => [r, label(r)]) : [["", "(no images found)"]], state.result);
   state.groupby = fillSelect("groupby", [["", "Nothing"], ...VARYING.filter(c => INPUTS.includes(c)).map(c => [c, splitName(c)[0]])], state.groupby);
   const preferred = state.caption || (NUMERIC.includes("max_total_def_in") ? "max_total_def_in" : NUMERIC.includes("max_total_def_mm") ? "max_total_def_mm" : "");
   state.caption = fillSelect("caption", [["", "Nothing"], ...NUMERIC.map(c => { const [n, u] = splitName(c); return [c, u ? `${n} [${u}]` : n]; })], preferred);
@@ -323,11 +327,24 @@ function ordered(rows) {
     return sign * (x - y) || byCase(a, b);
   });
 }
+// The 3D interaction index (crush included) replaced the 2D shear interaction index:
+// a run has one or the other, depending on when it was solved or last rechecked.
+const NEWER = {"Core shear interaction index": "Core 3D interaction index",
+               "Hardpoint shear interaction index": "Hardpoint 3D interaction index"};
+const OLDER = Object.fromEntries(Object.entries(NEWER).map(([old, now]) => [now, old]));
+function missing(r) {
+  if (r.status && r.status !== "ok") return esc(r.status + (r.error ? ": " + r.error : ""));
+  if (!Object.keys(r._images).length) return "No plots saved for this run (viewer.export_images() makes them while its folder is in outputs/)";
+  const show = name => `<button class="link" data-result="${esc(name)}">${esc(name)}</button>`;
+  if (NEWER[state.result] && r._images[NEWER[state.result]]) return `This run has the newer check: ${show(NEWER[state.result])}`;
+  if (OLDER[state.result] && r._images[OLDER[state.result]]) return `Solved before the 3D index; this run has ${show(OLDER[state.result])}`;
+  return `This run has no “${esc(state.result)}” plot`;
+}
 function tile(r) {
   const img = r._images[state.result];
   const body = img
     ? `<button class="img" data-run="${esc(r._run)}"><img loading="lazy" src="${esc(img.src)}" alt="${esc(state.result)}, ${esc(runTitle(r))}"></button>`
-    : `<div class="noimg">${r.status && r.status !== "ok" ? esc(r.status + (r.error ? ": " + r.error : "")) : "No image of this result (run viewer.export_images())"}</div>`;
+    : `<div class="noimg"><span>${missing(r)}</span></div>`;
   return `<figure class="tile"><header><b>${esc(runTitle(r))}</b>${badge(r)}</header>${body}` +
          `<figcaption><span class="cfg">${esc(describe(r, state.groupby))}</span>` +
          `<span class="metric">${captionText(r)}</span><span class="muted">${esc(plotRange(img))}</span></figcaption></figure>`;
@@ -358,6 +375,11 @@ function renderPlots(rows) {
 $("grid").addEventListener("click", e => {
   const b = e.target.closest("button.img");
   if (b) openLightbox(ORDER.findIndex(r => r._run === b.dataset.run));
+  const link = e.target.closest("button[data-result]");
+  if (link) {
+    state.result = $("result").value = link.dataset.result;
+    update();
+  }
 });
 
 // ---- table ------------------------------------------------------------------
@@ -365,7 +387,7 @@ const GROUPS = [
   ["Inputs", c => INPUTS.includes(c)],
   ["Pass / fail", c => isBoolCol(c)],
   ["Margins (MS)", c => /_MS$/.test(c)],
-  ["Stresses & allowables", c => /_(psi|MPa)$|interaction_index$/.test(c) && !/contact_pressure/.test(c)],
+  ["Stresses & allowables", c => /_(psi|MPa)$|interaction_index$|_governing$/.test(c) && !/contact_pressure/.test(c)],
   ["Deformation", c => /_def_|_uz_/.test(c)],
   ["Contact pressure", c => /contact_pressure/.test(c)],
   ["Bolt forces", c => /^bolt\d/.test(c)],

@@ -337,8 +337,6 @@ def build_model(modeler, p: dict, offset: float, holes: list[tuple[float, float]
         "area_core_mm2": sum(f.area.m_as(UNITS.mm**2) for f in core_faces),
         "area_hardpoint_mm2": sum(f.area.m_as(UNITS.mm**2) for f in hardpoint_faces),
         "area_pedalbox_mm2": sum(f.area.m_as(UNITS.mm**2) for f in pedalbox.faces),
-        # Lower washer's contact area on the panel per bolt (washer circle minus the slot): the crush area.
-        "panel_washer_areas_mm2": [sum(f.area.m_as(UNITS.mm**2) for f in faces) for faces in panel_washers],
     }
     design.close()
     return result

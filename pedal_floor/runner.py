@@ -11,12 +11,14 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import pathlib
+import re
 import time
 import traceback
 
 import pandas as pd
 
-from . import checks, config, geometry, layup, mechanical, viewer
+from . import checks, config, geometry, interaction, layup, mechanical, viewer
 
 log = logging.getLogger("pedal_floor")
 log.setLevel(logging.INFO)  # so each run's log.txt gets the stage messages
@@ -81,6 +83,16 @@ def _to_result_units(values: dict, system: str) -> dict:
     return converted
 
 
+def _strength_checks(p: dict, materials: dict[str, dict], run: pathlib.Path) -> dict:
+    """Strength-check columns of a solved run from its saved fields; also plots the
+    interaction index of each orthotropic region into the run's images."""
+    allowables = checks.allowables(p, materials)
+    fields = interaction.load(run / interaction.FIELDS)
+    summary = interaction.evaluate(fields, allowables)
+    interaction.plot(fields, summary, allowables, p, config.core_layer(p), run / "images")
+    return checks.evaluate(p, materials, summary)
+
+
 def run_case(sessions: Sessions, p: dict, materials: dict[str, dict], offset: float, holes: list) -> dict:
     """Run every stage for one parameter set at one pedal box offset; return its results row."""
     out = config.run_dir(p["case_id"], offset)
@@ -126,17 +138,12 @@ def run_case(sessions: Sessions, p: dict, materials: dict[str, dict], offset: fl
         stage = "solve"
         log.info("%s: solve", label)
         solved = mechanical.solve(mech, p, geo, acp_files["materials_xml"], acp_files["composite_definitions"], images,
-                                  checks.shear_allowables(p, materials))
+                                  out / interaction.FIELDS)
         mech.exit()
         mech = None
 
-        stresses, bolt_axial = solved.pop("stresses"), solved.pop("bolt_axial_max_N")
-        bearing = max(f / a for f, a in zip(bolt_axial, geo["panel_washer_areas_mm2"]))
-        row |= {
-            **solved,
-            **checks.evaluate(p, materials, stresses, bearing),
-            **mesh_info,
-        }
+        stage = "checks"
+        row |= {**solved, **_strength_checks(p, materials, out), **mesh_info}
         log.info("%s: done in %.0f s", label, time.time() - t0)
     except Exception as exc:
         row |= {"status": f"failed: {stage}", "error": f"{type(exc).__name__}: {exc}"}
@@ -191,16 +198,70 @@ def run_sweep(sessions: Sessions, case_ids: list[int] | None = None, offsets_in:
             if not results.empty:
                 same = (results["case_id"].astype(int) == int(raw["case_id"])) & (results["pedal_offset_in"].round(4) == record["pedal_offset_in"])
                 results = results[~same]
-            results = pd.concat([results, pd.DataFrame([record])], ignore_index=True)
-            results = results.sort_values(["case_id", "pedal_offset_in"], key=lambda s: s.astype(float))
-            if "passes" in results:
-                # A configuration passes only if every pedal position run so far passes.
-                ok = results["passes"].astype(str).eq("True")
-                results["case_passes"] = ok.groupby(results["case_id"].astype(int)).transform("all")
-            results.to_csv(results_path, index=False)
-            try:
-                viewer.build()
-            except Exception as exc:  # the viewer is a convenience; keep the sweep going
-                log.warning("Updating %s failed: %s", viewer.VIEWER, exc)
+            results = _save(pd.concat([results, pd.DataFrame([record])], ignore_index=True), results_path)
             log.info("Case %s @ %.2f in: %s (%.0f s)", raw["case_id"], offset / 25.4, record["status"], record.get("runtime_s", 0))
     return results
+
+
+def _save(results: pd.DataFrame, path: pathlib.Path) -> pd.DataFrame:
+    """Sort, set case_passes, write results.csv and update the results viewer."""
+    results = results.sort_values(["case_id", "pedal_offset_in"], key=lambda s: s.astype(float))
+    if "passes" in results:
+        # A configuration passes only if every pedal position run so far passes.
+        ok = results["passes"].astype(str).eq("True")
+        results["case_passes"] = ok.groupby(results["case_id"].astype(int)).transform("all")
+    results.to_csv(path, index=False)
+    try:
+        viewer.build()
+    except Exception as exc:  # the viewer is a convenience; keep going
+        log.warning("Updating %s failed: %s", viewer.VIEWER, exc)
+    return results
+
+
+# Strength-check columns of results.csv, including those of earlier versions of the checks.
+_CHECK_COLUMN = re.compile(r"^(core|hardpoint)_(shear_|crush|interaction|vonmises|washer_bearing|ok$)|^passes$")
+
+
+def recheck(case_ids: list[int] | None = None, mechanical_ui: bool = False) -> pd.DataFrame:
+    """Redo the strength checks of the runs still in outputs/ without solving again, e.g.
+    after a change to the checks or to the strengths in materials.csv, and update their
+    rows in results.csv, their interaction-index plots and the results viewer.
+
+    The checks use each run's saved fields (core_fields.json). Runs solved before those
+    were saved get them from their model.mechdb first (a fresh Mechanical per run, about
+    20 s); runs open in another Mechanical are skipped. Each run keeps the parameters it
+    was solved with (params.json); the strengths come from the current materials.csv."""
+    results_path = config.OUTPUTS / "results.csv"
+    materials = config.load_materials()
+    records = pd.read_csv(results_path).to_dict("records")
+    for record in records:
+        case = int(record["case_id"])
+        run = config.run_dir(case, float(record["pedal_offset_in"]) * 25.4)
+        if (case_ids is not None and case not in case_ids) or record["status"] != "ok" or not (run / "params.json").exists():
+            continue
+        try:
+            fields = run / interaction.FIELDS
+            if not fields.exists():
+                if (run / "model_Mech_Files" / ".mech_lock").exists():
+                    log.warning("%s: skipped, its project is locked: open in Mechanical, or left locked by a Mechanical "
+                                "that did not close cleanly (then delete model_Mech_Files/.mech_lock)", run.name)
+                    continue
+                # A new session per run: Mechanical has no mesh data for a second project opened in one.
+                mech = mechanical.launch(batch=not mechanical_ui)
+                try:
+                    mechanical.open_project(mech, run / "model.mechdb")
+                    mechanical.extract_fields(mech, fields)
+                finally:
+                    mech.exit()
+            p = json.loads((run / "params.json").read_text())
+            columns = _to_result_units(_strength_checks(p, materials, run), p["result_units"])
+        except Exception as exc:
+            log.warning("%s: recheck failed: %s", run.name, exc)
+            continue
+        for key in [k for k in record if _CHECK_COLUMN.match(k)]:
+            del record[key]
+        record |= columns
+        log.info("%s: %s", run.name, "passes" if columns["passes"] else "fails")
+    results = pd.DataFrame(records)
+    stale = [c for c in results if _CHECK_COLUMN.match(c) and results[c].isna().all()]  # checks no row has any more
+    return _save(results.drop(columns=stale), results_path)

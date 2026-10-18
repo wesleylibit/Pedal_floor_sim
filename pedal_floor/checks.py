@@ -1,27 +1,23 @@
 """Strength checks of the core and the hardpoint against datasheet allowables.
 
-The face sheets stay a stiffness model (no check). Which checks run depends on the
-strengths a material has in materials.csv:
+The face sheets stay a stiffness model (no check). The check depends on the strengths a
+material has in materials.csv:
 
-- shear_strength_L / shear_strength_W: transverse shear XZ and YZ in the core layer
-  (L is the material 1-direction, i.e. global X at core_angle 0), each on its own and
-  combined by a quadratic interaction evaluated point by point:
-  (txz / S_xz)^2 + (tyz / S_yz)^2 <= 1
-- yield_strength: von Mises in the core layer (metal hardpoints), washer bearing, and
-  the same shear checks against the shear yield, yield / sqrt(3)
-- compressive_strength: washer bearing (crush) of the hardpoint
+- Orthotropic (shear_strength_L / shear_strength_W and compressive_strength, e.g.
+  honeycomb or balsa): one interaction index, evaluated point by point over the layer and
+  both load steps (interaction.py):
+  R = sqrt((txz / S_xz)^2 + (tyz / S_yz)^2 + (sz / S_c)^2) <= 1
+  S_xz, S_yz: the L or W plate shear strength (L is the material 1-direction, i.e. global
+  X at core_angle 0); S_c: the (stabilised) compressive strength; sz: through-thickness
+  compression, from the contact pressure on the panel. Without a compressive strength the
+  crush term is left out.
+- Isotropic (yield_strength, e.g. aluminium): von Mises in the layer against yield.
 
-Each strength can be given as ``_typ`` and/or ``_min``; ``allowable_basis`` picks
-which, falling back to the other if only one exists.
+Each strength can be given as ``_typ`` and/or ``_min``; ``allowable_basis`` picks which,
+falling back to the other if only one exists.
 
-Margin of safety: MS = allowable / (safety_factor * stress) - 1; a check passes at MS >= 0.
-For the interaction, R = sqrt((txz/S_xz)^2 + (tyz/S_yz)^2) at its worst point and
-MS = 1 / (safety_factor * R) - 1.
-
-Washer bearing: shells carry no through-thickness stress, so the hardpoint crush
-stress under the nut is bolt force / lower washer contact area on the panel (washer
-circle minus the slot). The core is not checked for crush: the hardpoint sits under
-the washer.
+Margin of safety: MS = 1 / (safety_factor * R) - 1 for the index, and
+allowable / (safety_factor * stress) - 1 for von Mises; a check passes at MS >= 0.
 """
 
 from __future__ import annotations
@@ -29,22 +25,17 @@ from __future__ import annotations
 import math
 
 
-def _allowable(m: dict, name: str, basis: str) -> tuple[float | None, str]:
+def _allowable(m: dict, name: str, basis: str) -> float | None:
     for b in (basis, "typ" if basis == "min" else "min"):
         value = m.get(f"{name}_{b}")
         if isinstance(value, float) and value > 0:
-            return value, b
-    return None, ""
+            return value
+    return None
 
 
-def _check(prefix: str, stress: float, allowable: float, sf: float) -> dict:
-    ms = allowable / (sf * stress) - 1 if stress > 0 else math.inf
-    return {
-        f"{prefix}_MPa": stress,
-        f"{prefix}_allowable_MPa": allowable,
-        f"{prefix}_MS": round(ms, 3) if math.isfinite(ms) else ms,
-        f"{prefix}_ok": ms >= 0,
-    }
+def _margin(capacity: float, demand: float, sf: float) -> float:
+    ms = capacity / (sf * demand) - 1 if demand > 0 else math.inf
+    return round(ms, 3) if math.isfinite(ms) else ms
 
 
 def _shear_map(core_angle: float) -> tuple[str, str]:
@@ -64,69 +55,49 @@ def _region_material(p: dict, region: str) -> str:
     return p["core_material"] if region == "core" else p["hardpoint_material"]
 
 
-def shear_allowables(p: dict, materials: dict[str, dict]) -> dict[str, tuple[float, float]]:
-    """Allowable transverse shear (MPa) for global XZ and YZ, per region.
-
-    Core/balsa: the L/W plate shear strengths (mapped to X/Y by core_angle; at any other
-    angle both use the weaker). Metal: shear yield, yield / sqrt(3), both ways.
-    Regions whose material has none of these strengths are left out.
-    """
+def allowables(p: dict, materials: dict[str, dict]) -> dict[str, dict]:
+    """Allowables (MPa) per region: {"kind": "orthotropic", "xz", "yz", "crush"} from the
+    L/W shear strengths (mapped to X/Y by core_angle; at any other angle both use the
+    weaker) and the compressive strength, or {"kind": "isotropic", "yield"}. Regions whose
+    material has none of these strengths are left out."""
     basis = p["allowable_basis"]
     xz_name, yz_name = _shear_map(p["core_angle"])
     out = {}
     for region in REGIONS:
         m = materials[_region_material(p, region)]
-        strengths = {name: _allowable(m, name, basis)[0] for name in ("shear_strength_L", "shear_strength_W")}
-        if any(strengths.values()):
-            weakest = min(v for v in strengths.values() if v)
-            out[region] = (strengths.get(xz_name) or weakest, strengths.get(yz_name) or weakest)
-        else:
-            yield_strength, _ = _allowable(m, "yield_strength", basis)
-            if yield_strength:
-                out[region] = (yield_strength / math.sqrt(3),) * 2
+        shear = {name: _allowable(m, name, basis) for name in ("shear_strength_L", "shear_strength_W")}
+        if any(shear.values()):
+            weakest = min(v for v in shear.values() if v)
+            out[region] = {"kind": "orthotropic", "xz": shear.get(xz_name) or weakest, "yz": shear.get(yz_name) or weakest,
+                           "crush": _allowable(m, "compressive_strength", basis)}
+        elif yield_strength := _allowable(m, "yield_strength", basis):
+            out[region] = {"kind": "isotropic", "yield": yield_strength}
     return out
 
 
-def interaction_expression(allowables: tuple[float, float]) -> str:
-    """Mechanical user-defined result for the quadratic shear interaction index R:
-    R = sqrt((SXZ/S_xz)^2 + (SYZ/S_yz)^2), evaluated point by point (MPa)."""
-    s_xz, s_yz = allowables
-    return f"sqrt((SXZ/{s_xz!r})^2 + (SYZ/{s_yz!r})^2)"
-
-
-def evaluate(p: dict, materials: dict[str, dict], stresses: dict, bearing: float) -> dict:
-    """Columns for results.csv. ``stresses`` has max |value| in MPa for keys
-    {core,hardpoint}_{xz,yz}, hardpoint_vm, and the max interaction index R
-    (dimensionless) for {core,hardpoint}_interaction."""
-    basis, sf = p["allowable_basis"], p["safety_factor"]
-    allowables = shear_allowables(p, materials)
+def evaluate(p: dict, materials: dict[str, dict], summary: dict) -> dict:
+    """Columns for results.csv from interaction.evaluate's ``summary`` (stresses in MPa)."""
+    sf = p["safety_factor"]
     out, region_ok = {}, {}
-    for region in REGIONS:
-        m = materials[_region_material(p, region)]
-        checks = {}
-        if region in allowables:
-            for comp, allowable in zip(("xz", "yz"), allowables[region]):
-                checks |= _check(f"{region}_shear_{comp}", stresses[f"{region}_{comp}"], allowable, sf)
-            # Quadratic interaction of XZ and YZ at the same point:
-            # (SF*txz/S_xz)^2 + (SF*tyz/S_yz)^2 <= 1, i.e. MS = 1 / (SF * R) - 1.
-            r = stresses.get(f"{region}_interaction")
-            if r is not None:
-                ms = 1 / (sf * r) - 1 if r > 0 else math.inf
-                checks |= {
-                    f"{region}_shear_interaction_index": r,
-                    f"{region}_shear_interaction_MS": round(ms, 3) if math.isfinite(ms) else ms,
-                    f"{region}_shear_interaction_ok": ms >= 0,
-                }
-        yield_strength, _ = _allowable(m, "yield_strength", basis)
-        if yield_strength and region == "hardpoint":
-            checks |= _check(f"{region}_vonmises", stresses["hardpoint_vm"], yield_strength, sf)
-        if region == "hardpoint":
-            compressive, _ = _allowable(m, "compressive_strength", basis)
-            if compressive or yield_strength:
-                checks |= _check(f"{region}_washer_bearing", bearing, compressive or yield_strength, sf)
-        out |= checks
-        oks = [v for k, v in checks.items() if k.endswith("_ok")]
-        region_ok[region] = all(oks) if oks else None  # None: no allowables to check against
-        out[f"{region}_ok"] = region_ok[region]
+    for region, a in allowables(p, materials).items():
+        s = summary.get(region)
+        if not s:
+            continue
+        # Largest value of each stress anywhere in the layer, for information.
+        out |= {f"{region}_shear_xz_MPa": s["xz_max"], f"{region}_shear_yz_MPa": s["yz_max"], f"{region}_crush_MPa": s["crush_max"]}
+        ok = None
+        if a["kind"] == "orthotropic" and "index" in s:
+            ms = _margin(1.0, s["index"], sf)
+            out |= {f"{region}_{name}_allowable_MPa": a[c]
+                    for c, name in (("xz", "shear_xz"), ("yz", "shear_yz"), ("crush", "crush")) if a.get(c)}
+            out |= {f"{region}_interaction_index": s["index"], f"{region}_interaction_MS": ms,
+                    f"{region}_interaction_ok": ms >= 0, f"{region}_interaction_governing": s["governing"]}
+            ok = ms >= 0
+        elif a["kind"] == "isotropic" and "vm_max" in s:
+            ms = _margin(a["yield"], s["vm_max"], sf)
+            out |= {f"{region}_vonmises_MPa": s["vm_max"], f"{region}_vonmises_allowable_MPa": a["yield"],
+                    f"{region}_vonmises_MS": ms, f"{region}_vonmises_ok": ms >= 0}
+            ok = ms >= 0
+        out[f"{region}_ok"] = region_ok[region] = ok
     out["passes"] = all(v is not False for v in region_ok.values())
     return out

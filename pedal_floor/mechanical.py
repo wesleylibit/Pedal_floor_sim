@@ -16,7 +16,6 @@ import textwrap
 from ansys.acp.core.mechanical_integration_helpers import export_mesh_for_acp, import_acp_composite_definitions
 from ansys.mechanical.core import launch_mechanical
 
-from . import checks
 from .config import ANSYS_VERSION, core_layer, require_ansys
 from .geometry import (
     NS_CORE, NS_HARDPOINTS, NS_PANEL, NS_PEDALBOX, NS_PEDALBOX_LOAD, NS_PEDALBOX_OUTSIDE_JOINTS, NS_SLOTS, PANEL_BODY, PEDALBOX_BODY,
@@ -106,11 +105,11 @@ def mesh(mech, p: dict, geometry_path: pathlib.Path, mechdb_path: pathlib.Path, 
 
 
 def solve(mech, p: dict, geo: dict, materials_xml: pathlib.Path, composite_definitions: pathlib.Path, image_dir: pathlib.Path,
-          allowables: dict[str, tuple[float, float]]) -> dict:
+          fields_path: pathlib.Path) -> dict:
     """Import the layup, connect the pedal box, apply supports and loads, solve, and read results.
 
-    ``allowables`` holds the XZ/YZ shear allowables per region (checks.shear_allowables)
-    for the shear interaction results."""
+    The core-layer stresses and contact pressures, node by node, go to ``fields_path``
+    (see extract_fields) for the strength checks."""
     _run(mech, "import materials", f"Model.Materials.Import({str(materials_xml)!r})")
     import_acp_composite_definitions(mechanical=mech, path=composite_definitions)
     _run(mech, "body materials", f"""
@@ -300,17 +299,10 @@ def solve(mech, p: dict, geo: dict, materials_xml: pathlib.Path, composite_defin
         values.append(washer_pressure.Maximum.Value)
         ",".join(str(v) for v in values)
     """)
-    # Stresses in the core/hardpoint layer for the strength checks (checks.py): max |value|
-    # over both load steps and over the layer's middle and top/bottom. The result objects
-    # stay in the tree (at the final step) so they can be viewed in Mechanical.
+    # Stresses in the core/hardpoint layer, kept in the tree (at the final step, layer
+    # middle) to view in Mechanical; extract_fields reads them node by node for the checks.
     layer = core_layer(p)
-    # Quadratic XZ/YZ shear interaction, evaluated point by point as a user-defined result.
-    interactions = [
-        (region, ns_name, label, checks.interaction_expression(allowables[region]))
-        for region, ns_name, label in (("core", NS_CORE, "Core"), ("hardpoint", NS_HARDPOINTS, "Hardpoint"))
-        if region in allowables
-    ]
-    stress_out = _run(mech, "core layer stresses", f"""
+    _run(mech, "core layer stresses", f"""
         def layer_result(kind, region, label, orientation=None):
             result = solution.AddShearStress() if kind == "shear" else solution.AddEquivalentStress()
             if orientation is not None:
@@ -320,41 +312,14 @@ def solve(mech, p: dict, geo: dict, materials_xml: pathlib.Path, composite_defin
             result.Name = label + " (layer {layer})"
             return result
 
-        def interaction_result(region, label, expression):
-            result = solution.AddUserDefinedResult()
-            result.Location = ns[region]
-            result.Expression = expression
-            result.Layer = {layer}
-            result.Name = label + " shear interaction index (layer {layer})"
-            return result
-
-        def value(quantity):
-            return quantity.Value if hasattr(quantity, "Value") else float(quantity)
-
-        def max_abs(result):
-            values = []
-            for time in (1, 2):
-                result.DisplayTime = Quantity(time, "s")
-                for position in (ShellFaceType.Middle, ShellFaceType.TopAndBottom):
-                    result.Position = position
-                    result.EvaluateAllResults()
-                    values += [abs(value(result.Minimum)), abs(value(result.Maximum))]
-            result.DisplayTime = Quantity(2, "s")
-            result.Position = ShellFaceType.Middle
-            result.EvaluateAllResults()
-            return max(values)
-
-        stress_results = [
-            layer_result("shear", {NS_CORE!r}, "Core shear XZ", ShearOrientationType.XZPlane),
-            layer_result("shear", {NS_CORE!r}, "Core shear YZ", ShearOrientationType.YZPlane),
-            layer_result("shear", {NS_HARDPOINTS!r}, "Hardpoint shear XZ", ShearOrientationType.XZPlane),
-            layer_result("shear", {NS_HARDPOINTS!r}, "Hardpoint shear YZ", ShearOrientationType.YZPlane),
-            layer_result("vm", {NS_HARDPOINTS!r}, "Hardpoint von Mises"),
-        ]
-        for ns_name, label, expression in {[i[1:] for i in interactions]!r}:
-            stress_results.append(interaction_result(ns_name, label, expression))
-        ",".join(str(max_abs(r)) for r in stress_results)
+        layer_result("shear", {NS_CORE!r}, "Core shear XZ", ShearOrientationType.XZPlane)
+        layer_result("shear", {NS_CORE!r}, "Core shear YZ", ShearOrientationType.YZPlane)
+        layer_result("shear", {NS_HARDPOINTS!r}, "Hardpoint shear XZ", ShearOrientationType.XZPlane)
+        layer_result("shear", {NS_HARDPOINTS!r}, "Hardpoint shear YZ", ShearOrientationType.YZPlane)
+        layer_result("vm", {NS_HARDPOINTS!r}, "Hardpoint von Mises")
+        solution.EvaluateAllResults()
     """)
+    extract_fields(mech, fields_path)
     export_result_images(mech, image_dir, p["contact_plot_max"], p["result_units"])
     _run(mech, "save", "ExtAPI.DataModel.Project.Save()")
     v = [float(x) for x in out.split(",")]
@@ -381,11 +346,101 @@ def solve(mech, p: dict, geo: dict, materials_xml: pathlib.Path, composite_defin
         }
     # Should equal the applied Z load (load_fz); a check of the split.
     result["Fz_balance_N"] = result["joint1_net_Fz_N"] + result["joint2_net_Fz_N"] + result["outside_joints_contact_Fz_N"]
-    # Bolt axial force for the washer bearing check: preload (step 1) or loaded (step 2), whichever is larger.
-    result["bolt_axial_max_N"] = [max(abs(v[17]), v[8]), max(abs(v[18]), v[13])]
-    keys = ["core_xz", "core_yz", "hardpoint_xz", "hardpoint_yz", "hardpoint_vm"] + [f"{i[0]}_interaction" for i in interactions]
-    result["stresses"] = dict(zip(keys, (float(x) for x in stress_out.split(","))))
     return result
+
+
+# Result objects (tree name prefixes) read by extract_fields.
+FIELD_RESULTS = {
+    "core": (NS_CORE, {"xz": "Core shear XZ", "yz": "Core shear YZ"}),
+    "hardpoint": (NS_HARDPOINTS, {"xz": "Hardpoint shear XZ", "yz": "Hardpoint shear YZ", "vm": "Hardpoint von Mises"}),
+}
+FIELD_CONTACTS = {"pedal box": "Contact tool, pedal box", "washers": "Contact tool, washers"}
+
+_FIELDS_SCRIPT = r"""
+solution = Model.Analyses[0].Solution
+mesh = ExtAPI.DataModel.MeshDataByName(ExtAPI.DataModel.MeshDataNames[0])
+if mesh.NodeCount == 0:
+    raise Exception("No mesh data: Mechanical only loads it for the first project opened in a session")
+to_mm = Quantity(1, mesh.Unit).ConvertUnit("mm").Value
+ns = dict((n.Name, n) for n in Model.NamedSelections.Children)
+used = set()
+
+def find(prefix):
+    found = [c for c in solution.Children if c.Name.startswith(prefix)]
+    return found[0] if found else None
+
+def triangles(element_ids):
+    # Each element as triangles of its corner nodes (quads split in two).
+    out = []
+    for e in element_ids:
+        c = [int(n) for n in mesh.ElementById(e).CornerNodeIds]
+        used.update(c)
+        out.append(c[:3])
+        if len(c) == 4:
+            out.append([c[0], c[2], c[3]])
+    return out
+
+# Each result is read at both load steps (and, for layer results, at the layer's middle
+# and top/bottom) through temporary copies, evaluated together: every evaluation costs
+# seconds whatever it covers.
+copies = []
+
+def request(target, result, positions):
+    for step in (1, 2):
+        for position in positions:
+            copy = result.Duplicate()
+            copy.DisplayTime = Quantity(step, "s")
+            if position is not None:
+                copy.Position = position
+            copies.append((target, step, copy))
+
+def read_copies():
+    # target[node] = [step 1, step 2]: max |value| (MPa) over the positions read.
+    solution.EvaluateAllResults()
+    for target, step, copy in copies:
+        data = copy.PlotData
+        column = data["Values"]
+        to_mpa = Quantity(1, column.Unit).ConvertUnit("MPa").Value
+        for node, value in zip(data["Node"], column):
+            if abs(value) < 1e300:  # nodes without a value hold the largest double
+                per_step = target.setdefault(str(int(node)), [0.0, 0.0])
+                per_step[step - 1] = max(per_step[step - 1], abs(value) * to_mpa)
+        copy.Delete()
+
+fields = {"length_unit": "mm", "stress_unit": "MPa", "regions": {}, "contacts": {}}
+for region, (ns_name, components) in params["regions"].items():
+    elements = [e for f in ns[ns_name].Location.Ids for e in mesh.MeshRegionById(f).ElementIds]
+    data = {"triangles": triangles(elements)}
+    for component, prefix in components.items():
+        result = find(prefix)
+        if result is not None:
+            data[component] = {}
+            request(data[component], result, [ShellFaceType.Middle, ShellFaceType.TopAndBottom])
+    fields["regions"][region] = data
+for name, prefix in params["contacts"].items():
+    tool = find(prefix)
+    pressure = [c for c in tool.Children if str(c.DataModelObjectCategory) == "ContactPressure"][0]
+    bodies = set(ExtAPI.DataModel.GeoData.GeoEntityById(f).Body.Id for f in tool.Location.Ids)
+    elements = [e for b in bodies for e in mesh.MeshRegionById(b).ElementIds]
+    fields["contacts"][name] = {"triangles": triangles(elements), "pressure": {}}
+    request(fields["contacts"][name]["pressure"], pressure, [None])
+read_copies()
+fields["nodes"] = dict((str(n), [mesh.NodeById(n).X * to_mm, mesh.NodeById(n).Y * to_mm]) for n in used)
+with open(params["path"], "w") as f:
+    json.dump(fields, f)
+len(used)
+"""
+
+
+def extract_fields(mech, path: pathlib.Path) -> None:
+    """Write the core/hardpoint layer stresses (max |value| over the layer's middle, top and
+    bottom) and the contact pressures, node by node at the end of both load steps, with
+    the node positions and element triangles, to ``path`` (JSON) for the strength checks.
+
+    Works on the model just solved, or on a saved run that is the first project opened in
+    its Mechanical session (Mechanical has no mesh data for projects opened after that)."""
+    params = {"path": str(path), "regions": FIELD_RESULTS, "contacts": FIELD_CONTACTS}
+    _run(mech, "core fields", f"import json\nparams = json.loads({json.dumps(params)!r})\n" + _FIELDS_SCRIPT)
 
 
 def open_project(mech, mechdb_path: pathlib.Path) -> None:
@@ -478,5 +533,11 @@ def export_result_images(mech, image_dir: pathlib.Path, contact_plot_max: float,
         name, filename, low, high, unit, capped = line.split("\t")
         images.append({"result": name, "file": filename, "min": float(low) if low else None, "max": float(high) if high else None,
                        "unit": unit, "capped": capped == "True"})
-    (image_dir / "manifest.json").write_text(json.dumps(images, indent=2))
+    manifest = image_dir / "manifest.json"
+    if manifest.exists():
+        # Keep the plots made outside Mechanical (interaction.py); this export does not redo them.
+        names = {i["result"] for i in images}
+        images += [i for i in json.loads(manifest.read_text())
+                   if i.get("source") == "pedal_floor" and i["result"] not in names and (image_dir / i["file"]).exists()]
+    manifest.write_text(json.dumps(images, indent=2))
     return images

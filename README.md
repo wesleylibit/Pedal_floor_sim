@@ -22,7 +22,8 @@ The newest supported Ansys version installed is used (2026 R1 before 2025 R2). T
 ## Running
 
 - `Pedal_floor_FEA_script.ipynb`: validate the inputs, run one case, then the whole sweep. Its first cell explains the inputs in detail.
-- `results_viewer.ipynb`: builds `outputs/results_viewer.html` and opens it in your browser. The page shows any result plot for every run, plus a table of `results.csv`, with filters on the inputs. It can also export plots for runs solved before plots were exported automatically.
+- `results_viewer.ipynb`: builds `results_viewer/results_viewer.html` and opens it in your browser. The page shows any result plot for every run, plus a table of `results.csv`, with filters on the inputs. It can also export plots for runs solved before plots were exported automatically.
+
 Rough runtimes: about 80 s per run on the coarse mesh, 170 s on the fine mesh (`mesh_quality` in `inputs/constants.csv`). Each sweep row runs at every pedal box position (9 with the default 1 in step).
 
 ## Inputs (`inputs/`)
@@ -39,25 +40,38 @@ All values carry units (in, mm, lbf, N, psi, ksi, MPa, Pa, GPa, pcf, kg/m3, deg)
 - `outputs/results.csv`: one row per case and pedal position. It holds bolt reactions, the net out-of-plane force each joint puts on the panel, contact pressure, deflection, strength checks, weights and runtime.
 - Weights: areal weight of the face sheets, core layer and hardpoint layer; mass of the face sheets, core, hardpoint, washers, bolts (shank over the grip only, no head or nut) and pedal box plate. `panel_mass` is face sheets + core + hardpoint; `system_mass` is everything.
 - `outputs/case_###_offX.XXin/`: `model.mechdb` (open in Mechanical; ply-by-ply results can be added on the imported plies), `acp_model.acph5` (open in ACP), a log, and `images/`. `images/` has a plan view of every result in the Solution tree at the end of load step 2, in the result units, plus `manifest.json` (each plot's min/max).
-- `outputs/results_viewer.html`: one page for all runs, rewritten after every run (keep it in `outputs/`; it loads the images from the run folders).
+- `results_viewer/results_viewer.html`: one page for all runs, rewritten after every run.
   - **Plots**: pick a result, filter the runs by their inputs, group them by an input, and show a `results.csv` value under each plot. Click a plot to enlarge it.
   - **Table**: every `results.csv` column, with the same filters and toggleable column groups.
   - Each plot has its own colour scale, so compare the legends or values, not the colours.
+- `results_viewer/` also keeps its own copy of every run's plots (`plots/`) and results rows (`results.csv`). A run stays in the viewer after you delete its folder, or all of `outputs/`, to free space. A case and position run again replaces its saved row and plots. Delete `results_viewer/` to start the viewer afresh.
 
 ## Strength checks
 
-The core and hardpoint are checked against datasheet strengths in `materials.csv`; the face sheets are not checked (stiffness only). For each run, `results.csv` gives the stress, allowable, margin (MS) and pass/fail for each check, plus `core_ok`, `hardpoint_ok`, `passes` (this run) and `case_passes` (every pedal position of that case).
+The core and hardpoint are checked against datasheet strengths in `materials.csv`; the face sheets are not checked (stiffness only). The check depends on the material:
 
-- Core shear XZ/YZ in the core layer against the L/W plate shear strength (core ribbon along X), each on its own and combined: (τxz/S_L)² + (τyz/S_W)² ≤ 1, evaluated point by point. The interaction index R = √((τxz/S_L)² + (τyz/S_W)²) gives MS = 1/(safety_factor × R) − 1.
-- Balsa hardpoint: the same shear checks against its shear strength, and crush under the nut washer.
-- Metal hardpoint: the same shear checks against shear yield (yield/√3), von Mises and washer bearing against yield.
-- The core is not checked for crush; the hardpoint sits under the washer.
+- **Orthotropic** (honeycomb core, balsa hardpoint): one interaction index, evaluated at every node of the core (or hardpoint) layer at the end of both load steps:
+  R = √((τxz/S_xz)² + (τyz/S_yz)² + (σz/S_c)²) ≤ 1
+  - S_xz, S_yz: the L or W plate shear strength (core ribbon L along X).
+  - S_c: the (stabilised) compressive strength. A material without one gets no crush term.
+  - The check uses the largest R anywhere: MS = 1/(`safety_factor` × R) − 1.
+- **Isotropic** (aluminium hardpoint): von Mises in the layer against yield, MS = yield/(`safety_factor` × σvm) − 1.
 
-Details:
-- MS = allowable / (`safety_factor` × stress) − 1. `allowable_basis` (min or typ) picks the datasheet value.
-- Stresses are the maximum over both load steps.
-- Shells carry no through-thickness stress, so hardpoint crush is bolt force divided by the lower washer's contact area on the panel (washer circle minus the slot).
-- The core shear peak sits in the row of core elements along the hardpoint edge, where the stiffness jumps. That value depends on the mesh. Check failures there on the fine mesh before trusting them.
+For each run, `results.csv` gives:
+- the largest τxz, τyz and σz anywhere in each layer, for information;
+- the allowables;
+- the index, its MS, pass/fail, and which term governs at its worst point (`_interaction_governing`);
+- `core_ok`, `hardpoint_ok`, `passes` (this run) and `case_passes` (every pedal position of that case).
+
+Each run also gets a plot of R for each orthotropic layer, with the line R = 1, in its images and in the results viewer. `allowable_basis` (min or typ) picks the datasheet value.
+
+Where σz comes from:
+- Shells carry no through-thickness stress. σz is taken as the contact pressure pressing on the panel at that point: from the pedal box on one face and from the washers on the other, whichever is larger. It is interpolated from the contact mesh onto the panel nodes.
+- This ignores load spreading through the face sheets, which is conservative.
+- The pressure peaks at the edges and corners of the pedal box plate and washers depend on the mesh, and they often set the maximum R. Check failures there on the fine mesh, and look at the plot to see how much area is above R = 1.
+- The core shear peak along the hardpoint edge also depends on the mesh.
+
+To redo the checks of the runs still in `outputs/` without solving again, run `runner.recheck()` (cell in `Pedal_floor_FEA_script.ipynb`). Use it after changing strengths in `materials.csv`, or for runs solved before this check existed; those first get their stress fields from `model.mechdb`. Each run keeps its node-by-node stresses and contact pressures in `core_fields.json`.
 
 ## Model notes
 

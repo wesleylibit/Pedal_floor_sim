@@ -17,6 +17,7 @@ import pandas as pd
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 INPUTS = ROOT / "inputs"
 OUTPUTS = ROOT / "outputs"
+VIEWER_DIR = ROOT / "results_viewer"  # results viewer with saved copies of every run's plots and results
 
 SUPPORTED_ANSYS_VERSIONS = (261, 252)  # tested on 252; 261 is the preferred target
 
